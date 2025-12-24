@@ -8,6 +8,7 @@ class PyBulletManipulationEnv:
     def __init__(self, gui=True):
         self.gui = gui
         self.physics_client = p.connect(p.GUI if gui else p.DIRECT)
+        self.max_force = 200.0
 
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)
@@ -15,6 +16,16 @@ class PyBulletManipulationEnv:
 
         self._load_scene()
         self._setup_camera()
+
+    def get_joint_positions(self):
+        joint_states = p.getJointStates(self.robot_id, range(self.num_joints))
+        joint_positions = [state[0] for state in joint_states]
+        return np.array(joint_positions, dtype=np.float32)
+    
+    def get_joint_velocities(self):
+        joint_states = p.getJointStates(self.robot_id, range(self.num_joints))
+        joint_velocities = [state[1] for state in joint_states]
+        return np.array(joint_velocities, dtype=np.float32)
 
     def _load_scene(self):
         # Plane
@@ -94,17 +105,32 @@ class PyBulletManipulationEnv:
         return rgb
 
     def step(self, joint_positions):
-        for i in range(self.num_joints):
+        joint_positions = np.asarray(joint_positions, dtype=np.float32)
+
+        # Only loop over what action provides
+        for i in range(min(self.num_joints, len(joint_positions))):
             p.setJointMotorControl2(
-                bodyIndex=self.robot_id,
+                bodyUniqueId=self.robot_id,
                 jointIndex=i,
                 controlMode=p.POSITION_CONTROL,
                 targetPosition=joint_positions[i],
-                force=200,
+                force=self.max_force,
             )
+
         p.stepSimulation()
+
+
+        obs = {
+            "images": {
+                "wrist": self.get_wrist_camera_image()
+            }
+        }
+
         if self.gui:
             time.sleep(1 / 240)
+
+        return obs, joint_positions
+
 
     def cube_in_target(self):
         cube_pos, _ = p.getBasePositionAndOrientation(self.cube_id)
